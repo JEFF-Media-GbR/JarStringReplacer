@@ -17,6 +17,7 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
@@ -26,12 +27,52 @@ import java.util.zip.ZipInputStream;
 
 public class JarStringReplacer {
 
+    private static final String[] USAGE = {
+            "Usage: [options] <input.jar> <output.jar> <placeholder1> <replacement1> ...",
+            "",
+            "Options: ",
+            " -c <classname> - Only replaces strings in classes containing <classname>",
+            "",
+            "Placeholders: ",
+            " %int% - Random integer"
+    };
+
+    private static int getNonNullLength(String[] args) {
+        int i = 0;
+        for(String string : args) {
+            if(string != null) i++;
+        }
+        return i;
+    }
+
+    private static String[] getNewArgs(String[] args) {
+        String[] newArgs = new String[getNonNullLength(args)];
+        int newIndex = 0;
+        for (String arg : args) {
+            if (arg != null) newArgs[newIndex++] = arg;
+        }
+        return newArgs;
+    }
+
     public static void main(String... args) throws IOException {
 
-        if(args.length < 3 || args.length % 2 != 0) {
-            System.err.println("Invalid number of parameters. Usage: <input.jar> <output.jar> <placeholder1> <replacement1> ...");
+        String classMatcher = null;
+
+        for(int i = 0; i < args.length; i++) {
+            if(args[i] == null) continue;
+            if(args[i].equals("-c")) {
+                classMatcher = args[i+1];
+                args[i] = null;
+                args[i+1] = null;
+            }
+        }
+
+        if(getNonNullLength(args) < 3 || getNonNullLength(args) % 2 != 0) {
+            System.err.println("Invalid number of parameters.");
             return;
         }
+
+        args = getNewArgs(args);
 
         File inputJar = new File(args[0]);
         File outputJar = new File(args[1]);
@@ -39,21 +80,28 @@ public class JarStringReplacer {
         for(int i = 2; i < args.length; i+=2) {
             replacements.put(args[i],args[i+1]);
         }
-        new JarStringReplacer(inputJar, outputJar, replacements);
+        new JarStringReplacer(classMatcher, inputJar, outputJar, replacements);
     }
 
-    public JarStringReplacer(File inputJar, File outputJar, Map<String, String> replacements) throws IOException {
+    public JarStringReplacer(String classMatcher, File inputJar, File outputJar, Map<String, String> replacements) throws IOException {
         Map<String, ClassNode> nodes = loadClasses(inputJar);
         for(ClassNode cn : nodes.values()) {
-            for(MethodNode mn : cn.methods) {
-                for(AbstractInsnNode ain : mn.instructions.toArray()) {
+            if(classMatcher == null || cn.name.contains(classMatcher)) {
+                for (MethodNode mn : cn.methods) {
+                    for (AbstractInsnNode ain : mn.instructions.toArray()) {
 
-                    // LDC = Loading a constant value
-                    if(ain.getOpcode() == Opcodes.LDC) {
-                        LdcInsnNode ldc = (LdcInsnNode) ain;
-                        if(ldc.cst instanceof String) {
-                            for(Map.Entry<String,String> entry : replacements.entrySet()) {
-                                ldc.cst = ldc.cst.toString().replace(entry.getKey(), entry.getValue());
+                        // LDC = Loading a constant value
+                        if (ain.getOpcode() == Opcodes.LDC) {
+                            LdcInsnNode ldc = (LdcInsnNode) ain;
+                            if (ldc.cst instanceof String) {
+                                for (Map.Entry<String, String> entry : replacements.entrySet()) {
+                                    String oldCst = ldc.cst.toString();
+                                    ldc.cst = ldc.cst.toString().replace(entry.getKey(), placeholder(entry.getValue()));
+                                    String newCst = ldc.cst.toString();
+                                    if (!oldCst.equals(newCst)) {
+                                        System.out.println("Replaced " + entry.getKey() + " in " + cn.name + " at " + mn.name);
+                                    }
+                                }
                             }
                         }
                     }
@@ -63,6 +111,11 @@ public class JarStringReplacer {
         Map<String, byte[]> out = process(nodes, new HashMap<String, String>(), new URLClassLoader(new URL[] {inputJar.toURI().toURL()},ClassLoader.getSystemClassLoader()));
         out.putAll(loadNonClasses(inputJar));
         saveAsJar(out, outputJar);
+    }
+
+    private static String placeholder(String string) {
+        if(string.equals("%int%")) return String.valueOf(ThreadLocalRandom.current().nextInt());
+        return string;
     }
 
     Map<String, ClassNode> loadClasses(File jarFile) throws IOException {
@@ -114,7 +167,7 @@ public class JarStringReplacer {
         Remapper mapper = new SimpleRemapper(mappings);
         for (ClassNode cn : nodes.values()) {
             //try {
-                System.out.println(cn.name);
+                //System.out.println(cn.name);
                 ClassWriter cw = /*new ClassWriter(ClassWriter.COMPUTE_FRAMES); */new SafeClassWriter(null, null, ClassWriter.COMPUTE_FRAMES, childLoader);
                 ClassVisitor remapper = new ClassRemapper(cw, mapper);
                 cn.accept(remapper);

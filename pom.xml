@@ -20,6 +20,8 @@
                 <artifactId>maven-jar-plugin</artifactId>
                 <version>3.1.0</version>
                 <configuration>
+                    <outputDirectory>C:\mctest\plugins</outputDirectory>
+                    <finalName>replace</finalName>
                     <archive>
                         <manifest>
                             <mainClass>com.jeff_media.jarstringreplacer.JarStringReplacer</mainClass>

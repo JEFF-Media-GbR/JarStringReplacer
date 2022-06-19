@@ -32,9 +32,12 @@ public class JarStringReplacer {
             "",
             "Options: ",
             " -c <classname> - Only replaces strings in classes containing <classname>",
+            " -spigot50      - Replace 50% of all SpigotMC placeholders with 1111/2222/3333",
+            " -spigot100     - Replace all SpigotMC placeholders with 1111/2222/3333",
             "",
             "Placeholders: ",
-            " %int% - Random integer"
+            " %int% - Random integer",
+            " %<*>|orig% - Uses <*> or the original placeholder name"
     };
 
     private static int getNonNullLength(String[] args) {
@@ -58,17 +61,34 @@ public class JarStringReplacer {
 
         String classMatcher = null;
 
+        Map<String,String> replacements = new HashMap<>();
+
         for(int i = 0; i < args.length; i++) {
             if(args[i] == null) continue;
             if(args[i].equals("-c")) {
                 classMatcher = args[i+1];
                 args[i] = null;
                 args[i+1] = null;
+            } else if(args[i].equals("-spigot50")) {
+                replacements.put("%%__USER__%%","%1111|orig%");
+                replacements.put("%%__RESOURCE__%%","%2222|orig%");
+                replacements.put("%%__NONCE__%%","%3333|orig%");
+                args[i] = null;
+            } else if(args[i].equals("-spigot100")) {
+                replacements.put("%%__USER__%%","1111");
+                replacements.put("%%__RESOURCE__%%","2222");
+                replacements.put("%%__NONCE__%%","3333");
+                args[i] = null;
+            } else if(args[i].startsWith("-")) {
+                System.err.println("Unknown option: " + args[i]);
+                usage();
+                return;
             }
         }
 
-        if(getNonNullLength(args) < 3 || getNonNullLength(args) % 2 != 0) {
+        if(getNonNullLength(args) < 1 || getNonNullLength(args) % 2 != 0) {
             System.err.println("Invalid number of parameters.");
+            usage();
             return;
         }
 
@@ -76,11 +96,16 @@ public class JarStringReplacer {
 
         File inputJar = new File(args[0]);
         File outputJar = new File(args[1]);
-        Map<String,String> replacements = new HashMap<>();
         for(int i = 2; i < args.length; i+=2) {
             replacements.put(args[i],args[i+1]);
         }
         new JarStringReplacer(classMatcher, inputJar, outputJar, replacements);
+    }
+
+    private static void usage() {
+        for(String line : USAGE) {
+            System.out.println(line);
+        }
     }
 
     public JarStringReplacer(String classMatcher, File inputJar, File outputJar, Map<String, String> replacements) throws IOException {
@@ -96,10 +121,11 @@ public class JarStringReplacer {
                             if (ldc.cst instanceof String) {
                                 for (Map.Entry<String, String> entry : replacements.entrySet()) {
                                     String oldCst = ldc.cst.toString();
-                                    ldc.cst = ldc.cst.toString().replace(entry.getKey(), placeholder(entry.getValue()));
+                                    String replacement = placeholder(entry.getValue(),entry.getKey());
+                                    ldc.cst = ldc.cst.toString().replace(entry.getKey(), replacement);
                                     String newCst = ldc.cst.toString();
-                                    if (!oldCst.equals(newCst)) {
-                                        System.out.println("Replaced " + entry.getKey() + " in " + cn.name + " at " + mn.name);
+                                    if (oldCst.contains(entry.getKey())) {
+                                        System.out.println("Replaced " + entry.getKey() + " in " + cn.name + " at " + mn.name + " with " + replacement);
                                     }
                                 }
                             }
@@ -113,7 +139,12 @@ public class JarStringReplacer {
         saveAsJar(out, outputJar);
     }
 
-    private static String placeholder(String string) {
+    private static String placeholder(String string, String placeholder) {
+        if(string.startsWith("%") && string.endsWith("|orig%")) {
+            String replacement = string.substring(1,string.length()-"|orig%".length());
+            if(ThreadLocalRandom.current().nextInt(0,100) < 50) return replacement;
+            return placeholder;
+        }
         if(string.equals("%int%")) return String.valueOf(ThreadLocalRandom.current().nextInt());
         return string;
     }
@@ -166,15 +197,15 @@ public class JarStringReplacer {
         Map<String, byte[]> out = new HashMap<String, byte[]>();
         Remapper mapper = new SimpleRemapper(mappings);
         for (ClassNode cn : nodes.values()) {
-            //try {
+            try {
                 //System.out.println(cn.name);
                 ClassWriter cw = /*new ClassWriter(ClassWriter.COMPUTE_FRAMES); */new SafeClassWriter(null, null, ClassWriter.COMPUTE_FRAMES, childLoader);
                 ClassVisitor remapper = new ClassRemapper(cw, mapper);
                 cn.accept(remapper);
                 out.put(mappings.containsKey(cn.name) ? mappings.get(cn.name) : cn.name, cw.toByteArray());
-            //} catch (Exception ignored) {
-            //    System.out.println("Problem with " + cn.name);
-            //}
+            } catch (Exception ignored) {
+                System.out.println("Problem with " + cn.name);
+            }
         }
         return out;
     }

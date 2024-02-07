@@ -73,4 +73,11 @@
         </dependency>
     </dependencies>
 
+    <distributionManagement>
+        <repository>
+            <id>jeff-media-private</id>
+            <url>https://repo.jeff-media.com/private</url>
+        </repository>
+    </distributionManagement>
+
 </project>

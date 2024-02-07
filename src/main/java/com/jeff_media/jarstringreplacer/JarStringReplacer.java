@@ -204,7 +204,8 @@ public class JarStringReplacer {
                 cn.accept(remapper);
                 out.put(mappings.containsKey(cn.name) ? mappings.get(cn.name) : cn.name, cw.toByteArray());
             } catch (Exception ignored) {
-                System.out.println("Problem with " + cn.name);
+                //System.out.println("Problem with " + cn.name);
+                ignored.printStackTrace();
             }
         }
         return out;
